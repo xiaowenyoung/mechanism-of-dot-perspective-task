@@ -1,0 +1,195 @@
+---
+title: "Experiment2_fixationTtime_head"
+date: "2024.03.04"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+
+#rm(list=ls())
+#require("knitr") 
+#opts_chunk$set(tidy = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+#load libraries
+suppressMessages(library("tidyverse")) # to organize data
+suppressMessages(library("afex"))  # using 'all_fit' to find appropriate optimizer; and 'mixed' for significance test
+suppressMessages(library("lmerTest"))  # to fit data with mixed models
+suppressMessages(library("emmeans"))  # emmeans is needed for follow-up tests 
+suppressMessages(library("multcomp")) # for advanced control for multiple testing/Type 1 errors. using 'update' for post-hoc comp
+suppressMessages(library("ggeffects")) # for plotting (G)LMM results
+suppressMessages(library('car')) # setting labeled contrasts
+suppressMessages(library("ggplot2")) # for plotting
+suppressMessages(library("ggsci")) # for setting scientific journal color palettes 
+suppressMessages(library("gridExtra")) # for arranging the position of figures
+suppressMessages(library("ggpubr")) # using the ggexport
+suppressMessages(library("sjPlot")) # using the plot_model, to show random and fixed effects.
+suppressMessages(library("glmmTMB")) #required by plot_model when plotting random effects
+suppressMessages(library("performance")) # model assumptions & performance, to use check_model for model assumptions
+suppressMessages(library("RePsychLing")) #using the rePCA to determine redundant random effects
+suppressMessages(library("ggthemes"))#provide theme for plot
+suppressMessages(library("patchwork")) 
+suppressMessages(library("officer"))
+suppressMessages(library("xtable"))
+suppressMessages(library("flextable"))
+
+select <- dplyr::select # to avoid clashes with the MASS package
+
+```
+
+
+```{r loaddata}
+
+raw_data  <- read.csv(file="all_data_eyetracking.csv",head=TRUE) #read data
+data_df <- raw_data
+
+```
+
+
+```{r data cleaning}
+
+data_df        <- data_df %>% filter(subid != 2326) #exclude subject 2326
+data_df        <- data_df %>% filter(ACC != 0) #exclude false trials
+data_df$headAll  <- data_df$headAll * 1000 #s to ms
+data_df        <- data_df %>% filter(!is.na(headAll)) #excluding NA
+
+
+#Converts variables to factor type
+data_df$subid          <- factor(data_df$subid)
+data_df$type           <- factor(data_df$type)
+data_df$consistency    <- factor(data_df$consistency)
+
+data_df$consistency2   <- factor(data_df$consistency,levels=c('c','i1','i2')) #reorder the levels; consistency2 was computed to avoid errors in emmeans package.
+
+#distribution of the data
+hist(data_df$headAll)
+
+```
+
+
+```{r desrciping data}
+
+#1. how many subjects remained
+data_df %>% group_by(subid) %>% summarize() %>% nrow()
+
+#2. how many trials left for each cell
+tn <- data_df %>% group_by(subid,consistency,type) %>% summarize(trialn=length(subid)) %>% ungroup()
+
+min(tn$trialn)# check if any condition has too few trials
+
+#3. check the levels of the factors
+levels(data_df$type)
+levels(data_df$consistency)
+levels(data_df$consistency2)
+
+```
+
+2.3 re-coding and scaling predictors
+```{r recoding and scaling}
+
+#1. re-coding categorical predictors
+# must be Sum instead of sum
+contrasts(data_df$type)           <- contr.Sum(levels(data_df$type)) 
+contrasts(data_df$consistency)    <- contr.Sum(levels(data_df$consistency))
+contrasts(data_df$consistency2)   <- contr.Sum(levels(data_df$consistency2))
+
+#check the new coding approach
+contrasts(data_df$type)
+contrasts(data_df$consistency)
+contrasts(data_df$consistency2)
+
+```
+
+```{r full model}
+
+#fit maximal model first
+m2.head.full <- lmer(headAll ~ 1 + type * consistency2 + 
+                     (1 + type * consistency2 | subid), 
+                     data = data_df,
+                     control = lmerControl(optimizer = 'bobyqa',
+                                           calc.derivs = F,
+                                           optCtrl = list(maxfun = 2e5)))
+
+summary(m2.head.full)
+isSingular(m2.head.full) #Check for a singular fit
+
+```
+
+```{r rePCA1}
+
+#Random effects in the model were analyzed using PCA
+summary(rePCA(m2.head.full)) # to see how many random effects are needed
+
+model_terms <- model.matrix(m2.head.full)  ### Please, please check the model_terms very very carefully. #see also:  https://rpubs.com/Reinhold/22193 and https://rpubs.com/yjunechoe/correlationsLMEM
+
+p_name   <- colnames(model.matrix(m2.head.full)) 
+par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
+# must check the column names and get the right column!!! very very important.
+
+```
+
+```{r full model2}
+
+re_t          <- model.matrix(m2.head.full)[,2] # random effects of type
+re_c          <- model.matrix(m2.head.full)[,3] # random effects of consisc
+re_i1         <- model.matrix(m2.head.full)[,4] # random effects of consisi1
+re_tc         <- model.matrix(m2.head.full)[,5] # random effects of type:c
+re_ti1        <- model.matrix(m2.head.full)[,6] # random effects of type:i1
+
+#This should be the same as Full model
+m2.head.full2 <- lmer(headAll ~ 1  + type * consistency2 +
+                      (1 + re_t + re_c + re_i1 + re_tc + re_ti1| subid), 
+                      data = data_df,
+                      control = lmerControl(optimizer = 'bobyqa',
+                                            calc.derivs = F,
+                                            optCtrl = list(maxfun = 2e5)))
+
+summary(m2.head.full2)
+#Careful compare with the first full model
+
+```
+
+
+```{r re2 model}
+
+#PCA suggests that the intercept is sufficient to interpret all the variance
+m2.head.re1 <- lmer(headAll ~ 1  + type * consistency2 +
+                        (1 | subid), 
+                      data = data_df,
+                      control = lmerControl(optimizer = 'bobyqa',
+                                            calc.derivs = F,
+                                            optCtrl = list(maxfun = 2e5)))
+
+summary(m2.head.re1)
+isSingular(m2.head.re1)
+summary(rePCA(m2.head.re1))
+save(m2.head.re1, file = "m2_1res_headAll.RData")
+
+```
+
+
+
+```{r test}
+
+#Check for differences between this model and the full model, Ideally there should be no difference
+anova(m2.head.re1, m2.head.full, refit = F)
+
+```
+
+
+```{r sig test}
+
+headAll.sig2 <- mixed(headAll ~ 1  + type * consistency2 +
+                        (1 | subid), 
+                      data = data_df,
+                      method='LRT',
+                      check_contrasts = F,
+                      control = lmerControl(optimizer = 'bobyqa',
+                                            calc.derivs = F,
+                                            optCtrl = list(maxfun = 2e5)))
+
+headAll.sig2
+save(headAll.sig2, file = "headAll_sig.RData")
+#There isn't any significant result
+
+```

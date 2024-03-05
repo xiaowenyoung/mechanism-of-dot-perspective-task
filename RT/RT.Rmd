@@ -1,0 +1,363 @@
+---
+title: "眼动实验_反应时分析_LMM"
+date: "2024.03.01"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+
+#rm(list=ls())
+#require("knitr") 
+#opts_chunk$set(tidy = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+#load libraries
+suppressMessages(library("tidyverse")) # to organize data
+suppressMessages(library("afex"))  # using 'all_fit' to find appropriate optimizer; and 'mixed' for significance test
+suppressMessages(library("lmerTest"))  # to fit data with mixed models
+suppressMessages(library("emmeans"))  # emmeans is needed for follow-up tests 
+suppressMessages(library("multcomp")) # for advanced control for multiple testing/Type 1 errors. using 'update' for post-hoc comp
+suppressMessages(library("ggeffects")) # for plotting (G)LMM results
+suppressMessages(library('car')) # setting labeled contrasts
+suppressMessages(library("ggplot2")) # for plotting
+suppressMessages(library("ggsci")) # for setting scientific journal color palettes 
+suppressMessages(library("gridExtra")) # for arranging the position of figures
+suppressMessages(library("ggpubr")) # using the ggexport
+suppressMessages(library("sjPlot")) # using the plot_model, to show random and fixed effects.
+suppressMessages(library("glmmTMB")) #required by plot_model when plotting random effects
+suppressMessages(library("performance")) # model assumptions & performance, to use check_model for model assumptions
+suppressMessages(library("RePsychLing")) #using the rePCA to determine redundant random effects
+suppressMessages(library("ggthemes"))#provide theme for plot
+suppressMessages(library("patchwork")) 
+
+select <- dplyr::select # to avoid clashes with the MASS package
+
+```
+
+
+```{r loaddata}
+
+raw_data  <- read.csv(file="all_data_eyetracking.csv",head=TRUE) #read data
+data_df <- raw_data
+
+```
+
+
+```{r data cleaning}
+
+data_df        <- data_df %>% filter(subid != 2326)
+#去除2326号被试(被试数据疑似有点极端了)
+data_df        <- data_df %>% filter(ACC != 0) #去除错误的试次
+data_df$RT     <- data_df$RT * 1000 #将s的单位转换为ms
+
+#将变量转换为因子型
+data_df$subid          <- factor(data_df$subid)
+data_df$type           <- factor(data_df$type)
+data_df$consistency    <- factor(data_df$consistency)
+
+data_df$consistency2   <- factor(data_df$consistency,levels=c('c','i1','i2')) #reorder the levels; consistency2 was computed to avoid errors in emmeans package.
+
+#distribution of the data
+hist(data_df$RT)
+#test the distributions that best fit your data
+#https://ase.tufts.edu/bugs/guide/assets/mixed_model_guide.html
+#Say you've decided you want to run a mixed model. The next thing you have to do is find a probability distribution that best fits your data. There are many ways to test this, but I'll show you one. This method requires the packages 'car' and 'MASS'. Note that the negative binomial and gamma distributions can only handle positive numbers, and the Poisson distribution can only handle positive whole numbers. The binomial and Poisson distributions are different from the others because they are discrete rather than continuous, which means they quantify distinct, countable events or the probability of these events. Now let's find a fitting distribution
+qqp(data_df$RT, "norm") # norm dis
+# lnorm means lognormal
+qqp(data_df$RT, "lnorm")
+
+# qqp requires estimates of the parameters of the negative binomial, Poisson
+# and gamma distributions. You can generate estimates using the fitdistr
+# function. Save the output and extract the estimates of each parameter as I
+# have shown below.
+##The following binom and poission does not fit for RT data, because they are discrete distributions.
+# nbinom <- fitdistr(data_df$RT, "Negative Binomial")
+# qqp(data_df$RT, "nbinom", size = nbinom$estimate[[1]], mu = nbinom$estimate[[2]])
+# 
+# poisson <- fitdistr(data_df$RT, "Poisson")
+# qqp(data_df$RT, "pois", poisson$estimate)
+
+gamma <- fitdistr(data_df$RT, "gamma")
+qqp(data_df$RT, "gamma", shape = gamma$estimate[[1]], rate = gamma$estimate[[2]])
+
+#Note: Check out the plots I've generated using qqp. The y axis represents the observations and the x axis represents the quantiles modeled by the distribution. The solid red line represents a perfect distribution fit and the dashed red lines are the confidence intervals of the perfect distribution fit. You want to pick the distribution for which the largest number of observations falls between the dashed lines.
+
+```
+
+
+```{r desrciping data}
+
+#1. how many subjects remained
+data_df %>% group_by(subid) %>% summarize() %>% nrow()
+
+#2. how many trials left for each cell
+tn <- data_df %>% group_by(subid,consistency,type) %>% summarize(trialn=length(subid)) %>% ungroup()
+
+min(tn$trialn)# check if any condition has too few trials
+
+#3. check the levels of the factors
+levels(data_df$type)
+levels(data_df$consistency)
+levels(data_df$consistency2)
+
+```
+
+2.3 re-coding and scaling predictors
+```{r recoding and scaling}
+
+#1. re-coding categorical predictors
+# must be Sum instead of sum
+contrasts(data_df$type)           <- contr.Sum(levels(data_df$type)) 
+contrasts(data_df$consistency)    <- contr.Sum(levels(data_df$consistency))
+contrasts(data_df$consistency2)   <- contr.Sum(levels(data_df$consistency2))
+
+#check the new coding approach
+contrasts(data_df$type)
+contrasts(data_df$consistency)
+contrasts(data_df$consistency2)
+
+```
+
+
+```{r full model}
+
+#首先对全模型进行拟合
+m1.full <- lmer(RT ~ 1 + type * consistency2 + 
+                  (1 + type * consistency2 | subid), 
+                data = data_df,
+                control = lmerControl(optimizer = 'bobyqa',
+                                       calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+summary(m1.full)
+isSingular(m1.full) #查看是否奇异拟合
+
+```
+
+
+```{r rePCA1}
+
+#使用PCA对模型内的参数进行分析
+summary(rePCA(m1.full)) # to see how many random effects are needed. It seems 3 is good enough, not the full 6
+
+model_terms <- model.matrix(m1.full)  ### Please, please check the model_terms very very carefully. #see also:  https://rpubs.com/Reinhold/22193 and https://rpubs.com/yjunechoe/correlationsLMEM
+
+p_name   <- colnames(model.matrix(m1.full)) 
+par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
+# must check the column names and get the right column!!! very very important.
+#这一步生成了一个dataframe用来查看随机效应的顺序和具体内容
+
+```
+
+
+```{r full model2}
+
+re_t          <- model.matrix(m1.full)[,2] # random effects of type
+re_c          <- model.matrix(m1.full)[,3] # random effects of consisc
+re_i1         <- model.matrix(m1.full)[,4] # random effects of consisi1
+re_tc         <- model.matrix(m1.full)[,5] # random effects of type:c
+re_ti1        <- model.matrix(m1.full)[,6] # random effects of type:i1
+
+#This should be the same as Full model
+m1.full2 <- lmer(RT ~ 1  + type * consistency2 +
+                 (1 + re_t + re_c + re_i1 +re_tc +re_ti1 | subid), 
+                 data = data_df,
+                 control = lmerControl(optimizer = 'bobyqa',
+                                        calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+summary(m1.full2)
+#注意和第一个全模型进行仔细比对
+
+```
+```{r re2 model}
+
+#保留解释变异最大的三个随机效应(后续发现只要截距)
+m1.re1 <- lmer(RT ~ 1  + type * consistency2 +
+                 (1 | subid), 
+                 data = data_df,
+                 control = lmerControl(optimizer = 'bobyqa',
+                                        calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+summary(m1.re1)
+isSingular(m1.re1)
+summary(rePCA(m1.re1))
+save(m1.re1, file = "m1_1res_RT.RData")
+
+```
+
+```{r test}
+
+#检查这个模型和全模型之间是否存在差异，理想情况下应该没有差异
+anova(m1.re1, m1.full, refit = F)
+
+```
+
+
+```{r sig test}
+
+RT.sig1 <- anova(m1.re1,type = 3, test = 'F', ddf='Satterthwaite')  # F test
+
+RT.sig2 <- mixed(RT ~ 1  + type * consistency2 +
+                 (1 | subid), 
+                 data = data_df,
+                 method = "LRT",
+                 check_contrasts = F,
+                 control = lmerControl(optimizer = 'bobyqa',
+                                        calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+
+RT.sig1
+RT.sig2
+save(RT.sig2, file = "RT_sig.RData")
+#这里我们使用LRT比较的结果，这会让我们的paper看起来更牛逼（
+
+```
+
+
+```{r post-hoc comparisons}
+
+#事后检验/简单效应
+#https://cran.r-project.org/web/packages/afex/vignettes/afex_mixed_example.html
+#https://zhuanlan.zhihu.com/p/63092231?utm_source=wechat_session&utm_medium=social&utm_oi=669244116261539840&s_r=0
+#https://cran.r-project.org/web/packages/emmeans/vignettes/interactions.html
+
+load("RT_sig.RData")
+emm_options(lmer.df = "asymptotic") 
+# also possible: 'satterthwaite', 'kenward-roger' for LMMs but not GLMMs
+
+emmip(m1.re1, consistency2 ~ type) #simple plotting
+
+#consistency的主效应
+emm_RT0 <- emmeans(m1.re1, ~ consistency2)
+emm_RT0
+update(pairs(emm_RT0), by = NULL, adjust = "holm") 
+
+#type的简单主效应
+emm_RT <- emmeans(m1.re1, ~type | consistency2)
+emm_RT
+update(pairs(emm_RT), by = NULL, adjust = "holm") 
+# using the FDR corrections here
+
+#consistency的简单主效应
+emm_RT2 <- emmeans(m1.re1, ~consistency2 | type)
+emm_RT2
+update(pairs(emm_RT2), by = NULL, adjust = "holm") 
+
+```
+
+#下面的还没看和修改
+```{r model diagnoses,, fig.height = 6, fig.width = 10}
+
+############################1. plot the fitted value and the residuals#################################################
+#plot(m1) # no specific pattern is good
+plot(m1.noCounter) # no specific pattern is good
+
+##################################################2. plot the QQ plot#################################################
+#qqnorm(resid(m1))
+qqnorm(resid(m1.noCounter))
+
+################################################3. check the model assumptions in one line#########################################
+#check_model(m1)
+check_model(m1.noCounter)
+
+
+##########################################4. check out random effects and plot them##############################################
+#cfs <- coef(m1.noCounter)
+#var(cfs$subid$`appearance[S.0]`) ## to calculate the variance of fixed effects (should be 0), just as an example here, can do for others
+
+#plot with the plot_model:http://www.strengejacke.de/sjPlot/reference/plot_model.html
+#fixed effects,the same as summary funnction, should be careful, the interpretation of these effects depends on your coding scheme!!!
+#plot_model(m1.full)+ ylim(-.05, .05) #see also https://github.com/strengejacke/sjPlot/issues/440
+plot_model(m1.noCounter)
+
+#random effects
+RT.re  <- plot_model(m1.noCounter, type = "re", grid=FALSE)  #
+
+grid.arrange(RT.re[[1]],RT.re[[2]],RT.re[[3]],RT.re[[4]],RT.re[[5]],RT.re[[6]],nrow=2,ncol=3)
+
+
+```
+
+
+
+7. plotting results
+```{r sig plotting results}
+#https://stackoverflow.com/questions/69948052/plot-generalized-linear-mixed-models-glmms-mixture-of-categorical-and-numeric
+#https://strengejacke.github.io/ggeffects/articles/practical_logisticmixedmodel.html
+# see also ggeffect manual
+load("m1_full_RT.RData")
+
+################################################################### generating the marginal effects####################################################
+mydf <- ggemmeans(m1.full, terms = c("bin", "prob2")) ##do not use 'ggpredict', otherwise, do not consistent with post-hoc comparisions, see also https://strengejacke.github.io/ggeffects/articles/technical_differencepredictemmeans.html
+mydf <- mydf %>% mutate(x_lab = as.factor(ifelse(x == "1",'Early','Late')))
+
+windowsFonts(N=windowsFont("Times New Roman"),A=windowsFont("Arial")) #Custom Fonts
+pd <- position_dodge(0.2) #https://stackoverflow.com/questions/39533456/how-to-jitter-both-geom-line-and-geom-point-by-the-same-magnitude
+
+pic1 <- ggplot(mydf, aes(x=x_lab, y=predicted,group=group,color = group,fill=group)) +
+    #note:The layer placed first will be placed at the bottom. In this case,the line will be covered by points.  
+    geom_line(linetype='dashed',size=1,position = pd)+
+    geom_pointrange(aes(ymin=conf.low, ymax=conf.high), shape=21, fatten = 5, size = 1.5,position = pd)+
+    #The adjustment of line size is replaced by 'linewidth' in the new version of ggplot
+    scale_y_continuous(limits = c(380,560),breaks = seq(from=380,to=560,by=30),expand = c(0, 0))+
+    #https://stackoverflow.com/questions/13701347/force-the-origin-to-start-at-0
+    labs(x = "Learning Stage", y = "RT (ms)")+
+    #http://www.sthda.com/english/wiki/ggplot2-colors-how-to-change-colors-automatically-and-manually
+    scale_colour_manual(values=c('#4DBBD6','#039F87','#E64B35'),name='Validity',labels=c('high', 'medium','low'))+
+    scale_fill_manual(values=c('#4DBBD6','#039F87','#E64B35'),name='Validity',labels=c('high', 'medium','low'))+
+    theme_classic()+
+    theme(legend.position="top",
+          legend.title = element_text(size=20,colour='black',family="A"),
+          legend.text = element_text(size=20,colour='black',family="A"),
+          axis.ticks.length = unit(0.1, "cm"),
+          axis.text.x = element_text(size=20,colour='black',family="A"),
+          axis.text.y = element_text(size=20,colour='black',family="A"),
+          axis.title= element_text(size=24,colour='black',family="A"))
+pic1
+ggexport(pic1,filename = "p1_test1.png",width=2400,height=1600,res = 300)
+ggsave(pic1, filename = "p1_test2.png", dpi = 300,width=2400,height=1600,units = "px")#same as above, but export pic with better anti-aliasing effect
+
+
+############Using Custom Function#####################
+#When the aesthetic scheme is determined, the custom functions helps to plot different data more easily
+#You can flexibly decide the input of your function according to your own needs(The input is the parameter you may want to modify)
+effectplot <- function(d,ylimits,ybreaks,xlabs){
+fig <- ggplot(d, aes(x=x_lab, y=predicted,group=group,color = group,fill=group)) +
+    #note:The layer placed first will be placed at the bottom. In this case,the line will be covered by points.  
+    geom_line(linetype='dashed',size=1,position = pd)+
+    geom_pointrange(aes(ymin=conf.low, ymax=conf.high), shape=21, fatten = 5, size = 1.5,position = pd)+
+    #The adjustment of line size is replaced by 'linewidth' in the new version of ggplot
+    scale_y_continuous(limits = ylimits,breaks = ybreaks,expand = c(0, 0))+
+    #https://stackoverflow.com/questions/13701347/force-the-origin-to-start-at-0
+    labs(x = xlabs, y = "RT (ms)")+
+    #http://www.sthda.com/english/wiki/ggplot2-colors-how-to-change-colors-automatically-and-manually
+    scale_colour_manual(values=c('#4DBBD6','#039F87','#E64B35'),name='Validity',labels=c('high', 'medium','low'))+
+    scale_fill_manual(values=c('#4DBBD6','#039F87','#E64B35'),name='Validity',labels=c('high', 'medium','low'))+
+    theme_classic()+
+    theme(legend.position="top",
+          legend.title = element_text(size=20,colour='black',family="A"),
+          legend.text = element_text(size=20,colour='black',family="A"),
+          axis.ticks.length = unit(0.1, "cm"),
+          axis.text.x = element_text(size=20,colour='black',family="A"),
+          axis.text.y = element_text(size=20,colour='black',family="A"),
+          axis.title= element_text(size=24,colour='black',family="A"))
+}
+
+mydf2 <- ggemmeans(m1.full, terms = c("appearance", "prob2"))
+mydf2 <- mydf2 %>% mutate(x_lab = as.factor(ifelse(x == "0",'Alone','Audience')))
+
+#check range of y value
+min(mydf$conf.low)
+max(mydf$conf.high)
+#https://www.roelpeters.be/add-confidence-interval-line-ggplot/
+
+pic2 <- effectplot(mydf2,c(380,560),seq(from=380,to=560,by=30),xlabs='Context')
+pic2
+ggsave(pic2, filename = "p2.png", dpi = 300,width=2400,height=1600,units = "px")
+
+
+```
+
