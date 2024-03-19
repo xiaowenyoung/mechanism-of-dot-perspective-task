@@ -1,0 +1,343 @@
+---
+title: "EXP2_fixationNumbers_facedAt"
+date: "2024.03.04"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+
+#rm(list=ls())
+#require("knitr") 
+#opts_chunk$set(tidy = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+#load libraries
+suppressMessages(library("tidyverse")) # to organize data
+suppressMessages(library("afex"))  # using 'all_fit' to find appropriate optimizer; and 'mixed' for significance test
+suppressMessages(library("lmerTest"))  # to fit data with mixed models
+suppressMessages(library("emmeans"))  # emmeans is needed for follow-up tests 
+suppressMessages(library("multcomp")) # for advanced control for multiple testing/Type 1 errors. using 'update' for post-hoc comp
+suppressMessages(library("ggeffects")) # for plotting (G)LMM results
+suppressMessages(library('car')) # setting labeled contrasts
+suppressMessages(library("ggplot2")) # for plotting
+suppressMessages(library("ggsci")) # for setting scientific journal color palettes 
+suppressMessages(library("gridExtra")) # for arranging the position of figures
+suppressMessages(library("ggpubr")) # using the ggexport
+suppressMessages(library("sjPlot")) # using the plot_model, to show random and fixed effects.
+suppressMessages(library("glmmTMB")) #required by plot_model when plotting random effects
+suppressMessages(library("performance")) # model assumptions & performance, to use check_model for model assumptions
+suppressMessages(library("RePsychLing")) #using the rePCA to determine redundant random effects
+suppressMessages(library("ggthemes"))#provide theme for plot
+suppressMessages(library("patchwork")) 
+
+library(ggnewscale)
+library(ggpubr)
+library(ggsignif)
+library(ggnewscale)
+library(ggbeeswarm)
+library(ggsignif)
+library(magrittr)
+
+select <- dplyr::select # to avoid clashes with the MASS package
+
+```
+
+
+```{r loaddata}
+
+raw_data  <- read.csv(file="all_data_eyetracking.csv",head=TRUE) #read data
+data_df <- raw_data
+
+```
+
+
+```{r data cleaning}
+
+data_df        <- data_df %>% filter(ACC != 0) #去除错误的试次
+
+#将变量转换为因子型
+data_df$subid          <- factor(data_df$subid)
+data_df$type           <- factor(data_df$type)
+data_df$consistency    <- factor(data_df$consistency)
+
+data_df$consistency2   <- factor(data_df$consistency,levels=c('c','i1','i2')) #reorder the levels; consistency2 was computed to avoid errors in emmeans package.
+
+
+```
+
+
+```{r desrciping data}
+
+#1. how many subjects remained
+data_df %>% group_by(subid) %>% summarize() %>% nrow()
+
+#2. how many trials left for each cell
+tn <- data_df %>% group_by(subid,consistency,type) %>% summarize(trialn=length(subid)) %>% ungroup()
+
+min(tn$trialn)# check if any condition has too few trials
+
+#3. check the levels of the factors
+levels(data_df$type)
+levels(data_df$consistency)
+levels(data_df$consistency2)
+
+```
+
+2.3 re-coding and scaling predictors
+```{r recoding and scaling}
+
+#1. re-coding categorical predictors
+# must be Sum instead of sum
+contrasts(data_df$type)           <- contr.Sum(levels(data_df$type)) 
+contrasts(data_df$consistency)    <- contr.Sum(levels(data_df$consistency))
+contrasts(data_df$consistency2)   <- contr.Sum(levels(data_df$consistency2))
+
+#check the new coding approach
+contrasts(data_df$type)
+contrasts(data_df$consistency)
+contrasts(data_df$consistency2)
+
+```
+
+
+```{r full model}
+
+#首先对全模型进行拟合
+m3.at.full <- glmer(atNum ~ 1 + type * consistency2 + 
+                        (1 + type * consistency2 | subid), 
+                      data = data_df,
+                      family="poisson",
+                      control = glmerControl(optimizer = 'bobyqa',
+                                             calc.derivs = F,
+                                             optCtrl = list(maxfun = 2e5)))
+                      #此处注视次数为不连续变量，分布为泊松分布
+
+summary(m3.at.full)
+isSingular(m3.at.full) #查看是否奇异拟合
+
+```
+
+
+```{r rePCA1}
+
+#使用PCA对模型内的参数进行分析
+summary(rePCA(m3.at.full)) # to see how many random effects are needed. It seems 3 is good enough, not the full 6
+
+model_terms <- model.matrix(m3.at.full)  ### Please, please check the model_terms very very carefully. #see also:  https://rpubs.com/Reinhold/22193 and https://rpubs.com/yjunechoe/correlationsLMEM
+
+p_name   <- colnames(model.matrix(m3.at.full)) 
+par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
+# must check the column names and get the right column!!! very very important.
+#这一步生成了一个dataframe用来查看随机效应的顺序和具体内容
+
+```
+```{r full model2}
+
+re_t          <- model.matrix(m3.at.full)[,2] # random effects of type
+re_c          <- model.matrix(m3.at.full)[,3] # random effects of consisc
+re_i1         <- model.matrix(m3.at.full)[,4] # random effects of consisi1
+re_tc         <- model.matrix(m3.at.full)[,5] # random effects of type:c
+re_ti1        <- model.matrix(m3.at.full)[,6] # random effects of type:i1
+
+#This should be the same as Full model
+m3.at.full2 <- glmer(atNum ~ 1  + type * consistency2 +
+                        (1 + re_t + re_c + re_i1 +re_tc +re_ti1 | subid), 
+                      data = data_df,
+                      family="poisson",
+                      control = glmerControl(optimizer = 'bobyqa',
+                                             calc.derivs = F,
+                                             optCtrl = list(maxfun = 2e5)))
+
+summary(m3.at.full2)
+#注意和第一个全模型进行仔细比对
+
+```
+
+
+```{r re2 model}
+
+#保留解释变异最大的2个随机效应
+m3.at.re2 <- glmer(atNum ~ 1  + type * consistency2 +
+                        (1  + re_i1 | subid), 
+                      data = data_df,
+                      family="poisson",
+                      control = glmerControl(optimizer = 'bobyqa',
+                                             calc.derivs = F,
+                                             optCtrl = list(maxfun = 2e5)))
+
+summary(m3.at.re2)
+isSingular(m3.at.re2)
+summary(rePCA(m3.at.re2))
+save(m3.at.re2, file = "m3_2res_atNum.RData")
+
+```
+
+
+```{r test}
+
+#检查这个模型和全模型之间是否存在差异，理想情况下应该没有差异
+anova(m3.at.re2, m3.at.full, refit = F)
+
+```
+
+
+```{r sig test}
+
+atNum.sig2 <- mixed(atNum ~ 1  + type * consistency2 +
+                        (1  + re_i1 | subid), 
+                      data = data_df,
+                      family="poisson",
+                      method='LRT',
+                      check_contrasts = F,
+                      control = glmerControl(optimizer = 'bobyqa',
+                                             calc.derivs = F,
+                                             optCtrl = list(maxfun = 2e5)))
+
+atNum.sig2
+save(atNum.sig2, file = "atNum_sig.RData")
+
+```
+
+
+```{r post-hoc comparisons}
+
+#事后检验/简单效应
+#https://cran.r-project.org/web/packages/afex/vignettes/afex_mixed_example.html
+#https://zhuanlan.zhihu.com/p/63092231?utm_source=wechat_session&utm_medium=social&utm_oi=669244116261539840&s_r=0
+#https://cran.r-project.org/web/packages/emmeans/vignettes/interactions.html
+
+load("atNum_sig.RData")
+emmip(m3.at.re2, ~ consistency2) #simple plotting
+
+#consistency主效应
+emm_head <- emmeans(m3.at.re2, ~ consistency2)
+emm_head
+update(pairs(emm_head), by = NULL, adjust = "holm") 
+# using the FDR corrections here
+
+```
+
+
+```{r mean data of paticipant}
+
+description1_df  <- data_df %>% group_by(consistency) %>%
+  summarise(des_atNum = mean(atNum), des_sd = sd(atNum))
+
+description2_df  <- data_df %>% group_by(type, consistency) %>%
+  summarise(des_atNum = mean(atNum), des_sd = sd(atNum))
+
+mean_df         <- data_df %>% group_by(subid, type, consistency) %>%
+  summarise(mean_atNum = mean(atNum))
+
+mean_df$consistency <- ifelse(mean_df$consistency == "c", "consistent", 
+                              ifelse(mean_df$consistency == "i1",
+                                     "inconsistent1",
+                                    "inconsistent2"))
+
+print(description1_df)
+print(description2_df)
+print(mean_df)
+
+```
+
+
+```{r plot loading data}
+
+mean_df$consistency <- factor(mean_df$consistency)  #将自变量转换为因子型
+mean_df$type <- factor(mean_df$type, levels = c("person", "fan"))
+#如果对于自变量的排序有要求，需要手动指定levels
+
+```
+
+
+```{r plotting}
+
+#前置工作，设定各种基础参数
+windowsFonts(N=windowsFont("Times New Roman"),A=windowsFont("Arial")) 
+
+p<-ggplot(mean_df, aes(x = type, y = mean_atNum, 
+                       fill = consistency,color = consistency)) +
+#设定x轴和y轴，同时设定图例，fill为填充，color为边框
+  
+  scale_y_continuous(limits = c(0,2.2),
+                     breaks = seq(from=0,to=2.0,by=0.4),
+                     expand = expansion(mult = c(0, 0.1))) +
+  labs(x = "Type", y = "Number of fixations") +
+#设定x轴和y轴的最小和最大值以及步长，expand函数用于在设定轴上创造额外的空间
+  
+  scale_colour_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
+  scale_fill_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
+#设定color和fill的颜色，此处为全局设定，但是后面可以用ggnewscale包进行局部设定
+  
+  theme(legend.position="right",
+        legend.title = element_text(size=10,colour='black',family="A"),
+        legend.text = element_text(size=10,colour='black',family="A"),
+        legend.key.size=unit(0.5,"cm"),
+        #图例的设定
+        
+        axis.ticks.length = unit(0.1, "cm"),  #轴上刻度长度的设定
+        axis.text.x = element_text(size=16,colour='black',family ="A"),
+        axis.text.y = element_text(size=16,colour='black',family="A"),
+        axis.title.x = element_text(size=20,colour='black',family="A"),
+        axis.title.y = element_text(size=20,colour='black',family="A"))
+        #轴标题以及轴刻度文字的设定
+p
+
+```
+
+
+```{r background}
+p1<-p + geom_bar(position=position_dodge(),
+                 stat="summary",colour = "black",size=0.5)
+p1
+
+p2 <- p1  + geom_vline(aes(xintercept=as.numeric(as.factor(type))+0.5),
+                      linetype=2,cex=1.2)+
+      geom_rect(aes(xmin=as.numeric(as.factor(type))+0.5,
+                    xmax=Inf, ymin=(-Inf),ymax=Inf),
+                fill='grey90',color='grey90')+
+      geom_vline(xintercept =data_df$condictions,linetype=2,cex=1.2)+
+      geom_bar(position=position_dodge(),
+               stat="summary",colour = "black",size=0.5)
+p2
+```
+
+                  
+```{r error bar}
+
+p3 <- p2 + geom_beeswarm(data = mean_df, aes(y = mean_atNum),
+                         dodge.width = 0.9,
+                         shape = 21, size = 3, stroke = 0.5) +
+      scale_colour_manual(values=c("black","black","black"),
+                          name='consistency')+
+      stat_summary(fun.data = 'mean_se', geom = "errorbar",
+                   colour = "black",
+                   width = 0.2,position = position_dodge(0.9))+
+      geom_signif(y_position=c(1.8,2.0,2.2,1.8,2.0,2.2),
+                  xmin=c(0.7,1.0,0.7,1.7,2.0,1.7),
+                  xmax=c(1.0,1.3,1.3,2.0,2.3,2.3),
+                  annotation=c("***","***","***","***","***","***"), 
+                  tip_length=0, size=0.8, textsize = 7,  vjust = 0.4)
+
+p3
+#去掉灰底, 去掉背景网格线, 去掉顶部和右侧框线
+p4 <- p3+theme_bw()+   #使用bw这个theme自动优化图形的美观性
+  theme(panel.grid=element_blank()) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank())
+
+p4
+```
+
+
+```{r save the plot}
+
+ggsave(p4, filename = "exp2_atNum.pdf", dpi = 500,
+       width=2800,height=2000,units = "px")
+#保存成pdf可以方便之后修改dpi信息(pdf储存的为矢量图)
+
+```
+

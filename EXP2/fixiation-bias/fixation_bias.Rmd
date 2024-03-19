@@ -1,0 +1,93 @@
+---
+title: "fixation bias"
+author: "Binjie Yang"
+date: "2024-03-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+
+# 给定的点
+point <- data.frame(x = -379.339080810546, y = 35.1380767822265)
+
+# 矩形参数
+roi1_center <- data.frame(x = 0, y = 30)
+roi1_width  <- 240
+roi1_height <- 180
+
+roi2_center <- data.frame(x = -440, y = 0)
+roi2_width  <- 400
+roi2_height <- 240
+
+roi3_center <- data.frame(x = 440, y = 0)
+roi3_width  <- 400
+roi3_height <- 240
+
+# 创建图形
+p1 <- ggplot() +
+  
+  geom_rect(aes(xmin = roi1_center$x - roi1_width / 2, 
+                xmax = roi1_center$x + roi1_width / 2,
+                ymin = roi1_center$y - roi1_width / 2,
+                ymax = roi1_center$y + roi1_width / 2), 
+                fill = "transparent", color = "blue") +
+  geom_rect(aes(xmin = roi2_center$x - roi2_width / 2, 
+                xmax = roi2_center$x + roi2_width / 2,
+                ymin = roi2_center$y - roi2_width / 2,
+                ymax = roi2_center$y + roi2_width / 2), 
+                fill = "transparent", color = "blue") +
+  geom_rect(aes(xmin = roi3_center$x - roi3_width / 2, 
+                xmax = roi3_center$x + roi3_width / 2,
+                ymin = roi3_center$y - roi3_width / 2,
+                ymax = roi3_center$y + roi3_width / 2), 
+                fill = "transparent", color = "blue") +
+  
+  # 绘制点
+  geom_point(data = point, aes(x = x, y = y), color = "red", size = 3) +
+  
+  # 设置坐标轴范围
+  xlim(-960, 960) + ylim(-540, 540) +
+  
+  # 设置坐标轴标签和标题
+  labs(x = "X", y = "Y", title = "Point and Rectangle") 
+  
+p1
+```
+
+
+```{r 111}
+
+# 定义函数判断坐标点是否在矩形框内
+point_in_rectangle <- function(x, y, rect_center_x, rect_center_y, rect_width, rect_height) {
+  rect_left <- rect_center_x - rect_width / 2
+  rect_right <- rect_center_x + rect_width / 2
+  rect_top <- rect_center_y + rect_height / 2
+  rect_bottom <- rect_center_y - rect_height / 2
+  
+  if (x >= rect_left && x <= rect_right && y >= rect_bottom && y <= rect_top) {
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+# 给定坐标点和矩形框参数
+point_x <- -379.339080810546
+point_y <- 35.1380767822265
+rectangle_center_x <- -440
+rectangle_center_y <- 0
+rectangle_width <- 400
+rectangle_height <- 240
+
+# 调用函数判断坐标点是否在矩形框内
+result <- point_in_rectangle(point_x, point_y, rectangle_center_x, rectangle_center_y, rectangle_width, rectangle_height)
+
+# 输出结果
+if (result) {
+  print("坐标点在矩形框内")
+} else {
+  print("坐标点不在矩形框内")
+}
+
+```

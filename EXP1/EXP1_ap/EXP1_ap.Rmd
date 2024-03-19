@@ -1,0 +1,361 @@
+---
+title: "EXP1_ap"
+author: "Binjie Yang"
+date: "2024-03-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+#load libraries
+suppressMessages(library("tidyverse")) # to organize data
+suppressMessages(library("afex"))  # using 'all_fit' to find appropriate optimizer; and 'mixed' for significance test
+suppressMessages(library("lmerTest"))  # to fit data with mixed models
+suppressMessages(library("emmeans"))  # emmeans is needed for follow-up tests 
+suppressMessages(library("multcomp")) # for advanced control for multiple testing/Type 1 errors. using 'update' for post-hoc comp
+suppressMessages(library("ggeffects")) # for plotting (G)LMM results
+suppressMessages(library('car')) # setting labeled contrasts
+suppressMessages(library("ggplot2")) # for plotting
+suppressMessages(library("ggsci")) # for setting scientific journal color palettes 
+suppressMessages(library("gridExtra")) # for arranging the position of figures
+suppressMessages(library("ggpubr")) # using the ggexport
+suppressMessages(library("sjPlot")) # using the plot_model, to show random and fixed effects.
+suppressMessages(library("glmmTMB")) #required by plot_model when plotting random effects
+suppressMessages(library("performance")) # model assumptions & performance, to use check_model for model assumptions
+suppressMessages(library("RePsychLing")) #using the rePCA to determine redundant random effects
+suppressMessages(library("ggthemes"))#provide theme for plot
+suppressMessages(library("patchwork")) 
+
+library(gghalves)
+library(ggpubr)
+library(rstatix)
+library(ggnewscale)
+library(ggsignif)
+library(reshape2)
+library(RColorBrewer)
+library(grid)
+library(magrittr)
+
+select <- dplyr::select # to avoid clashes with the MASS package
+
+```
+
+
+```{r loaddata}
+
+raw_data  <- read.csv(file="data_ap.csv",head=TRUE) #read data
+data_df <- raw_data
+
+```
+
+
+```{r data cleaning}
+
+data_df          <- data_df %>% filter(matching != 'mismatch')  #只保留match试次
+data_df          <- data_df %>% filter(key_resp_3.corr != 0)  #去除错误的试次
+data_df          <- data_df %>% filter(consistency != 'filler')
+data_df$RT       <- data_df$key_resp_3.rt * 1000 #将s的单位转换为ms
+
+#将变量转换为因子型
+data_df$participant     <- factor(data_df$participant)
+data_df$stage           <- factor(data_df$stage, levels = c('baseline', 'adapt'))
+data_df$consistency     <- factor(data_df$consistency, levels=c('c','i'))
+
+```
+
+
+```{r desrciping data}
+
+#1. how many subjects remained
+data_df %>% group_by(participant) %>% summarize() %>% nrow()
+
+#2. how many trials left for each cell
+tn <- data_df %>% group_by(participant,consistency,stage) %>% summarize(trialn=length(participant)) %>% ungroup()
+
+min(tn$trialn)# check if any condition has too few trials
+
+#3. check the levels of the factors
+levels(data_df$stage)
+levels(data_df$consistency)
+
+```
+
+2.3 re-coding and scaling predictors
+```{r recoding and scaling}
+
+#1. re-coding categorical predictors
+# must be Sum instead of sum
+contrasts(data_df$stage)           <- contr.Sum(levels(data_df$stage)) 
+contrasts(data_df$consistency)    <- contr.Sum(levels(data_df$consistency))
+
+#check the new coding approach
+contrasts(data_df$stage)
+contrasts(data_df$consistency)
+
+```
+
+```{r full model}
+
+#首先对全模型进行拟合
+m1.full <- lmer(RT ~ 1 + stage * consistency + 
+                  (1 + stage * consistency | participant), 
+                data = data_df,
+                control = lmerControl(optimizer = 'bobyqa',
+                                       calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+summary(m1.full)
+isSingular(m1.full) #查看是否奇异拟合
+
+```
+
+```{r rePCA1}
+
+#使用PCA对模型内的参数进行分析
+summary(rePCA(m1.full)) 
+model_terms <- model.matrix(m1.full)
+
+p_name   <- colnames(model.matrix(m1.full)) 
+par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
+# must check the column names and get the right column!!! very very important.
+#这一步生成了一个dataframe用来查看随机效应的顺序和具体内容
+
+```
+
+
+```{r full model2}
+
+re_s          <- model.matrix(m1.full)[,2] # random effects of stage
+re_c          <- model.matrix(m1.full)[,3] # random effects of consis
+re_sc         <- model.matrix(m1.full)[,4] # random effects of stage:consis
+
+#This should be the same as Full model
+m1.full2 <- lmer(RT ~ 1  + stage * consistency +
+                 (1 + re_s + re_c + re_sc | participant), 
+                 data = data_df,
+                 control = lmerControl(optimizer = 'bobyqa',
+                                        calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+summary(m1.full2)
+#注意和第一个全模型进行仔细比对
+
+```
+
+
+```{r re1 model}
+
+#保留解释变异最大的三个随机效应
+m1.re1 <- lmer(RT ~ 1  + stage * consistency +
+                 (1 | participant), 
+                 data = data_df,
+                 control = lmerControl(optimizer = 'bobyqa',
+                                        calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+summary(m1.re1)
+isSingular(m1.re1)
+summary(rePCA(m1.re1))
+save(m1.re1, file = "ap_m1.re1.RData")
+
+```
+
+
+```{r test}
+
+#检查这个模型和全模型之间是否存在差异，理想情况下应该没有差异
+anova(m1.re1, m1.full, refit = F)
+
+```
+
+
+```{r sig test}
+
+RT.sig <- mixed(RT ~ 1  + stage * consistency +
+                 (1  | participant), 
+                 data = data_df,
+                 method = "LRT",
+                 check_contrasts = F,
+                 control = lmerControl(optimizer = 'bobyqa',
+                                        calc.derivs = F,
+                                       optCtrl = list(maxfun = 2e5)))
+
+
+
+RT.sig
+save(RT.sig, file = "ap_sig.RData")
+
+```
+
+
+```{r post-hoc comparisons}
+
+emm_options(lmer.df = "asymptotic") 
+emmip(m1.re1, consistency ~ stage) #simple plotting
+
+#consistency的主效应
+emm_RT0 <- emmeans(m1.re1, ~ consistency)
+emm_RT0
+update(pairs(emm_RT0), by = NULL, adjust = "holm") 
+
+#stage的简单主效应
+emm_RT <- emmeans(m1.re1, ~stage | consistency)
+emm_RT
+update(pairs(emm_RT), by = NULL, adjust = "holm") 
+# using the FDR corrections here
+
+#consistency的简单主效应
+emm_RT2 <- emmeans(m1.re1, ~consistency | stage)
+emm_RT2
+update(pairs(emm_RT2), by = NULL, adjust = "holm") 
+
+```
+
+
+```{r mean data of paticipant}
+
+description1_df  <- data_df %>% group_by(consistency) %>%
+  summarise(des_RT = mean(RT), des_sd = sd(RT))
+
+description2_df  <- data_df %>% group_by(stage, consistency) %>%
+  summarise(des_RT = mean(RT), des_sd = sd(RT))
+
+mean_df         <- data_df %>% group_by(participant, stage, consistency) %>%
+  summarise(mean_RT = mean(RT)/1000)
+
+mean_df$consistency <- ifelse(mean_df$consistency == "c", "consistent", "inconsistent")
+
+print(description1_df)
+print(description2_df)
+print(mean_df)
+
+```
+
+
+```{r rain and cloud plot loading data}
+
+mean_df$consistency <- factor(mean_df$consistency)  #将自变量转换为因子型
+mean_df$stage <- factor(mean_df$stage, levels = c("baseline", "adapt"))
+#如果对于自变量的排序有要求，需要手动指定levels
+
+```
+
+
+```{r plotting}
+
+#前置工作，设定各种基础参数
+windowsFonts(N=windowsFont("Times New Roman"),A=windowsFont("Arial")) 
+
+p<-ggplot(mean_df, aes(x = stage, y = mean_RT, 
+                       fill = consistency,color = consistency)) +
+#设定x轴和y轴，同时设定图例，fill为填充，color为边框
+  
+  scale_y_continuous(limits = c(0.2,1.4),
+                     breaks = seq(from=0.2,to=1.4,by=0.2),
+                     expand = c(0, 0.1)) +
+  labs(x = "Task stage", y = "Reaction time(secs)") +
+#设定x轴和y轴的最小和最大值以及步长，expand函数用于在设定轴上创造额外的空间
+  
+  scale_colour_manual(values=c("#e5be79","#3e86b5"),name='consistency')+
+  scale_fill_manual(values=c("#e5be79","#3e86b5"),name='consistency')+
+#设定color和fill的颜色，此处为全局设定，但是后面可以用ggnewscale包进行局部设定
+  
+  theme(legend.position="right",
+        legend.title = element_text(size=10,colour='black',family="A"),
+        legend.text = element_text(size=10,colour='black',family="A"),
+        legend.key.size=unit(0.5,"cm"),
+        #图例的设定
+        
+        axis.ticks.length = unit(0.1, "cm"),  #轴上刻度长度的设定
+        axis.text.x = element_text(size=16,colour='black',family ="A"),
+        axis.text.y = element_text(size=16,colour='black',family="A"),
+        axis.title.x = element_text(size=20,colour='black',family="A"),
+        axis.title.y = element_text(size=20,colour='black',family="A"))
+        #轴标题以及轴刻度文字的设定
+p
+
+#自定义颜色
+#mycolor<-c("#e5be79","#3e86b5") 
+#p0 <- p+scale_color_manual(values=rev(mycolor)) +
+  #scale_fill_manual(values=rev(mycolor))
+#p0
+
+
+#先画一半小提琴图(geom_half_violin)，得到p1：
+#一半小提琴图的参数调整：
+#position：位置调整，这里将其向右水平移动0.1；
+#side：显示哪一侧， "I"代表左侧，"R"代表右侧，默认"I"；
+#adjust：调整带宽，这里设为1.2使宽带略变平滑；
+#trim：小提琴图尾部的数据修整，默认为"T",表示将尾部修整到数据范围；"F"表示不修剪尾部；
+p1<-p+geom_half_violin(position=position_nudge(x=0.1,y=0),
+                       side='R',adjust=1.2,
+                       trim=T,color=NA,alpha=0.8)
+p1
+
+
+
+#在半个小提琴图左侧加上散点图并进行调整，得到p2：
+p2<-p1+geom_point(aes
+                  (x = as.numeric(stage)-0.15,#散点位置向左平移0.15
+                   y = mean_RT,
+                   color = consistency),
+                   position = position_jitter(width =0.03),
+                  size =1.0, shape =20)
+#调整散点，使取值相同的原重合散点分散开
+p2
+
+
+p3 <- p2 + new_scale_color()+    
+#使用函数创建新的scalecolor，需要放在绘制箱线图前面
+  
+  geom_boxplot(outlier.shape = NA, #隐藏离群点；
+               width =0.1,
+               alpha=0.7,
+               position = position_dodge(width = 0.15))+  #设定box间距离
+  scale_colour_manual(values=c("black","black"),name='consistency')+
+#此步局部设置box图的轮廓color为黑色，但是散点图的颜色不变
+  
+
+
+  stat_signif(annotations =c("***", "n.s."),
+              y_position = c(1.35, 1.35),
+              xmin = c(0.95, 1.95),
+              xmax = c(1.05, 2.05),
+              size = NA,  #横线的大小，NA则为没有横线
+              tip_length = 0,  #左右两边的竖线的长度
+              color="black",
+              textsize = 5)  #显著性标记的大小
+
+
+p3
+
+
+#去掉灰底, 去掉背景网格线, 去掉顶部和右侧框线
+p4 <- p3+theme_bw()+   #使用bw这个theme自动优化图形的美观性
+  theme(panel.grid=element_blank()) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank())
+    
+###一些零碎的优化代码###
+    #axis.title.x = element_text(vjust = -1),
+    #axis.title.y = element_text(vjust = 5),
+#让x轴和y轴的轴标题距离轴刻度更远一些(具体原理尚不清晰???)
+
+    #plot.margin = margin(20,45,30,30),  
+#调整画布大小，四个参数分别为trbl(trouble, 上右下左)
+    #legend.position = c(1,0.9))  #调整图例的位置
+
+p4
+```
+
+
+```{r save the plot}
+
+ggsave(p4, filename = "ap_plot.pdf", dpi = 600,
+       width=2800,height=2000,units = "px")
+#保存成pdf可以方便之后修改dpi信息(pdf储存的为矢量图)
+
+```
