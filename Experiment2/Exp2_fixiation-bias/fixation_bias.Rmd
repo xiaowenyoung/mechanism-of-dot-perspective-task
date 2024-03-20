@@ -1,93 +1,328 @@
 ---
-title: "fixation bias"
-author: "Binjie Yang"
-date: "2024-03-18"
-output: html_document
+title: "EXP2_fixation bias"
+Author: "Binjie Yang"
+date: "2024.03.19"
+output:
+  html_document:
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
-library(ggplot2)
 
-# 给定的点
-point <- data.frame(x = -379.339080810546, y = 35.1380767822265)
+#rm(list=ls())
+#require("knitr") 
+#opts_chunk$set(tidy = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+#load libraries
+suppressMessages(library("tidyverse")) # to organize data
+suppressMessages(library("afex"))  # using 'all_fit' to find appropriate optimizer; and 'mixed' for significance test
+#suppressMessages(library("lmerTest"))  # to fit data with mixed models
+suppressMessages(library("emmeans"))  # emmeans is needed for follow-up tests 
+suppressMessages(library("multcomp")) # for advanced control for multiple testing/Type 1 errors. using 'update' for post-hoc comp
+suppressMessages(library("ggeffects")) # for plotting (G)LMM results
+suppressMessages(library('car')) # setting labeled contrasts
+suppressMessages(library("ggplot2")) # for plotting
+suppressMessages(library("ggsci")) # for setting scientific journal color palettes 
+suppressMessages(library("gridExtra")) # for arranging the position of figures
+suppressMessages(library("ggpubr")) # using the ggexport
+suppressMessages(library("sjPlot")) # using the plot_model, to show random and fixed effects.
+suppressMessages(library("glmmTMB")) #required by plot_model when plotting random effects
+suppressMessages(library("performance")) # model assumptions & performance, to use check_model for model assumptions
+suppressMessages(library("RePsychLing")) #using the rePCA to determine redundant random effects
+suppressMessages(library("ggthemes"))#provide theme for plot
+suppressMessages(library("patchwork")) 
 
-# 矩形参数
-roi1_center <- data.frame(x = 0, y = 30)
-roi1_width  <- 240
-roi1_height <- 180
+library(ggnewscale)
+library(ggpubr)
+library(ggsignif)
+library(ggnewscale)
+library(ggbeeswarm)
+library(ggsignif)
+library(magrittr)
+library(ordinal)
+library(RVAideMemoire)
 
-roi2_center <- data.frame(x = -440, y = 0)
-roi2_width  <- 400
-roi2_height <- 240
+select <- dplyr::select # to avoid clashes with the MASS package
 
-roi3_center <- data.frame(x = 440, y = 0)
-roi3_width  <- 400
-roi3_height <- 240
-
-# 创建图形
-p1 <- ggplot() +
-  
-  geom_rect(aes(xmin = roi1_center$x - roi1_width / 2, 
-                xmax = roi1_center$x + roi1_width / 2,
-                ymin = roi1_center$y - roi1_width / 2,
-                ymax = roi1_center$y + roi1_width / 2), 
-                fill = "transparent", color = "blue") +
-  geom_rect(aes(xmin = roi2_center$x - roi2_width / 2, 
-                xmax = roi2_center$x + roi2_width / 2,
-                ymin = roi2_center$y - roi2_width / 2,
-                ymax = roi2_center$y + roi2_width / 2), 
-                fill = "transparent", color = "blue") +
-  geom_rect(aes(xmin = roi3_center$x - roi3_width / 2, 
-                xmax = roi3_center$x + roi3_width / 2,
-                ymin = roi3_center$y - roi3_width / 2,
-                ymax = roi3_center$y + roi3_width / 2), 
-                fill = "transparent", color = "blue") +
-  
-  # 绘制点
-  geom_point(data = point, aes(x = x, y = y), color = "red", size = 3) +
-  
-  # 设置坐标轴范围
-  xlim(-960, 960) + ylim(-540, 540) +
-  
-  # 设置坐标轴标签和标题
-  labs(x = "X", y = "Y", title = "Point and Rectangle") 
-  
-p1
 ```
 
 
-```{r 111}
+```{r loaddata}
 
-# 定义函数判断坐标点是否在矩形框内
-point_in_rectangle <- function(x, y, rect_center_x, rect_center_y, rect_width, rect_height) {
-  rect_left <- rect_center_x - rect_width / 2
-  rect_right <- rect_center_x + rect_width / 2
-  rect_top <- rect_center_y + rect_height / 2
-  rect_bottom <- rect_center_y - rect_height / 2
+raw_data  <- read.csv(file="bias_data.csv",head=TRUE)
+#note: one subject's data deleted because of the eye-tracking hdf5 file was missing
+
+data_df <- raw_data
+
+```
+
+
+```{r data cleaning}
+
+data_df          <- data_df %>% filter(consistency != 'filler')
+
+#将变量转换为因子型
+data_df$subid          <- factor(data_df$subid)
+data_df$type           <- factor(data_df$type)
+data_df$consistency    <- factor(data_df$consistency)
+
+data_df$consistency2   <- factor(data_df$consistency,levels=c('c','i1','i2')) #reorder the levels; consistency2 was computed to avoid errors in emmeans package.
+
+#我们的因变量为多项分布的数据，这里也把它因子化
+data_df$bias <- factor(data_df$bias, ordered = TRUE)
+
+```
+
+
+```{r desrciping data}
+
+#1. how many subjects remained
+data_df %>% group_by(subid) %>% summarize() %>% nrow()
+
+#2. how many trials left for each cell
+tn <- data_df %>% group_by(subid,consistency,type) %>% summarize(trialn=length(subid)) %>% ungroup()
+
+min(tn$trialn)# check if any condition has too few trials
+
+#3. check the levels of the factors
+levels(data_df$type)
+levels(data_df$consistency)
+levels(data_df$consistency2)
+
+```
+
+
+```{r recoding and scaling}
+
+#1. re-coding categorical predictors
+# must be Sum instead of sum
+contrasts(data_df$type)           <- contr.Sum(levels(data_df$type)) 
+contrasts(data_df$consistency)    <- contr.Sum(levels(data_df$consistency))
+contrasts(data_df$consistency2)   <- contr.Sum(levels(data_df$consistency2))
+
+#check the new coding approach
+contrasts(data_df$type)
+contrasts(data_df$consistency)
+contrasts(data_df$consistency2)
+
+```
+
+
+```{r full model}
+
+#首先对全模型进行拟合
+
+m1.full <- clmm(bias ~ 1 + type * consistency2 + 
+                (1 + type * consistency2 | subid), 
+                data = data_df)
+
+#For condition number of hessian, High numbers, say larger than e+4 or e+6 indicate that the model is ill defined or singular fit.
+
+summary(m1.full)
+
+```
+
+
+```{r rePCA1}
+
+# 提取随机效应
+random_effects <- ranef(m1.full)$subid
+pca_result <- prcomp(random_effects)
+summary(pca_result)
+
+model_terms <- model.matrix(m1.full)
+p_name   <- colnames(model.matrix(m1.full)) 
+par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
+# must check the column names and get the right column!!! very very important.
+#这一步生成了一个dataframe用来查看随机效应的顺序和具体内容
+
+```
+
+
+
+```{r re1 model}
+
+#发现保留截距已经可以解释全部变异
+m1.bias.re1 <- clmm(bias ~ 1 + type * consistency2 +
+                      (1 |subid), 
+                      data = data_df, Hess = TRUE)
+
+
+
+summary(m1.bias.re1)
+
+random_effects <- ranef(m1.bias.re1)$subid
+pca_result <- prcomp(random_effects)
+summary(pca_result)
+
+save(m1.bias.re1, file = "m1_1res_bias.RData")
+
+```
+
+
+```{r sig test}
+
+bias.sig <- Anova.clmm(m1.bias.re1,type = 2)
+bias.sig
+save(bias.sig, file = "bias_sig.RData")
+
+```
+
+
+```{r post-hoc comparisons}
+
+emmip(m1.bias.re1, ~ consistency2 | type) #simple plotting
+emmip(m1.bias.re1, ~ type | consistency2) #simple plotting
+
+#type主效应
+emm_t <- emmeans(m1.bias.re1, ~ type)
+emm_t
+update(pairs(emm_t), by = NULL, adjust = "holm") 
+
+# using the FDR corrections here
+#consistency主效应
+emm_c <- emmeans(m1.bias.re1, ~ consistency2)
+emm_c
+update(pairs(emm_c), by = NULL, adjust = "holm") 
+# using the FDR corrections here
+
+#type简单主效应
+emm_tc <- emmeans(m1.bias.re1, ~ type | consistency2)
+emm_tc
+update(pairs(emm_tc), by = NULL, adjust = "holm") 
+
+#consistency简单主效应
+emm_ct <- emmeans(m1.bias.re1, ~ consistency2 | type)
+emm_ct
+update(pairs(emm_ct), by = NULL, adjust = "holm") 
+
+```
+
+
+```{r mean data of paticipant}
+
+data_df$bias        <- as.character(data_df$bias)
+data_df$bias        <- as.numeric(data_df$bias)
+
+description1_df     <- data_df %>% group_by(consistency) %>%
+  summarise(des_bias = mean(bias), des_sd = sd(bias))
+
+description2_df     <- data_df %>% group_by(type, consistency) %>%
+  summarise(des_bias = mean(bias), des_sd = sd(bias))
+
+mean_df             <- data_df %>% group_by(subid, type, consistency) %>%
+  summarise(mean_bias = mean(bias))
+
+mean_df$consistency <- ifelse(mean_df$consistency == "c", "consistent", 
+                              ifelse(mean_df$consistency == "i1",
+                                     "inconsistent1",
+                                    "inconsistent2"))
+
+print(description1_df)
+print(description2_df)
+print(mean_df)
+
+```
+
+
+```{r plot loading data}
+
+mean_df$consistency <- factor(mean_df$consistency)  #将自变量转换为因子型
+mean_df$type <- factor(mean_df$type, levels = c("person", "fan"))
+#如果对于自变量的排序有要求，需要手动指定levels
+
+```
+
+
+```{r 前置工作/画背景}
+
+#前置工作，设定各种基础参数
+windowsFonts(N=windowsFont("Times New Roman"),A=windowsFont("Arial")) 
+
+p<-ggplot(mean_df, aes(x = type, y = mean_bias, 
+                       fill = consistency,color = consistency)) +
+#设定x轴和y轴，同时设定图例，fill为填充，color为边框
   
-  if (x >= rect_left && x <= rect_right && y >= rect_bottom && y <= rect_top) {
-    return(TRUE)
-  } else {
-    return(FALSE)
-  }
-}
+  scale_y_continuous(limits = c(-1,1.2),
+                     breaks = seq(from=-1 ,to=1, by=0.4),
+                     expand = expansion(mult = c(0, 0.1))) +
+  labs(x = "Type", y = "Fixation bias") +
+#设定x轴和y轴的最小和最大值以及步长，expand函数用于在设定轴上创造额外的空间
+  
+  scale_colour_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
+  scale_fill_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
+#设定color和fill的颜色，此处为全局设定，但是后面可以用ggnewscale包进行局部设定
+  
+  theme(legend.position="right",
+        legend.title = element_text(size=10,colour='black',family="A"),
+        legend.text = element_text(size=10,colour='black',family="A"),
+        legend.key.size=unit(0.5,"cm"),
+        #图例的设定
+        
+        axis.ticks.length = unit(0.1, "cm"),  #轴上刻度长度的设定
+        axis.text.x = element_text(size=16,colour='black',family ="A"),
+        axis.text.y = element_text(size=16,colour='black',family="A"),
+        axis.title.x = element_text(size=20,colour='black',family="A"),
+        axis.title.y = element_text(size=20,colour='black',family="A"))
+        #轴标题以及轴刻度文字的设定
+p
 
-# 给定坐标点和矩形框参数
-point_x <- -379.339080810546
-point_y <- 35.1380767822265
-rectangle_center_x <- -440
-rectangle_center_y <- 0
-rectangle_width <- 400
-rectangle_height <- 240
+```
 
-# 调用函数判断坐标点是否在矩形框内
-result <- point_in_rectangle(point_x, point_y, rectangle_center_x, rectangle_center_y, rectangle_width, rectangle_height)
 
-# 输出结果
-if (result) {
-  print("坐标点在矩形框内")
-} else {
-  print("坐标点不在矩形框内")
-}
+```{r background}
+p1<-p + geom_bar(position=position_dodge(),
+                 stat="summary",colour = "black",size=0.5)
+p1
+
+p2 <- p1  + geom_vline(aes(xintercept=as.numeric(as.factor(type))+0.5),
+                      linetype=2,cex=1.2)+
+      geom_rect(aes(xmin=as.numeric(as.factor(type))+0.5,
+                    xmax=Inf, ymin=(-Inf),ymax=Inf),
+                fill='grey90',color='grey90')+
+      geom_vline(xintercept =data_df$condictions,linetype=2,cex=1.2)+
+      geom_bar(position=position_dodge(),
+               stat="summary",colour = "black",size=0.5)
+p2
+```
+
+                  
+```{r error bar}
+
+p3 <- p2 + geom_beeswarm(data = mean_df, aes(y = mean_bias),
+                         dodge.width = 0.9,
+                         shape = 21, size = 3, stroke = 0.5) +
+      scale_colour_manual(values=c("black","black","black"),
+                          name='consistency')+
+      stat_summary(fun.data = 'mean_se', geom = "errorbar",
+                   colour = "black",
+                   width = 0.2,position = position_dodge(0.9))+
+      geom_signif(y_position=c(0.9, 0.9),
+                  xmin=c(0.85, 1.85),
+                  xmax=c(1.15, 2.15),
+                  annotation=c("***","***"), 
+                  tip_length=0, size= NA, textsize = 7,  vjust = 0.4)+
+      geom_signif(y_position=1.2,xmin=0.7,xmax=1.7,
+                  annotation="**",
+                  tip_length=0.05, size= 0.6, textsize = 7,  vjust = 0.4)
+
+p3
+#去掉灰底, 去掉背景网格线, 去掉顶部和右侧框线
+p4 <- p3+theme_bw()+   #使用bw这个theme自动优化图形的美观性
+  theme(panel.grid=element_blank()) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank())
+
+p4
+```
+
+
+```{r save the plot}
+
+ggsave(p4, filename = "exp2_bias.pdf", dpi = 500,
+       width=2800,height=2000,units = "px")
+#保存成pdf可以方便之后修改dpi信息(pdf储存的为矢量图)
 
 ```
