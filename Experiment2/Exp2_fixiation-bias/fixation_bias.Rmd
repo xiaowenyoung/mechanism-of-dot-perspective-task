@@ -203,6 +203,9 @@ update(pairs(emm_ct), by = NULL, adjust = "holm")
 data_df$bias        <- as.character(data_df$bias)
 data_df$bias        <- as.numeric(data_df$bias)
 
+description0_df     <- data_df %>% group_by(type) %>%
+  summarise(des_bias = mean(bias), des_sd = sd(bias))
+
 description1_df     <- data_df %>% group_by(consistency) %>%
   summarise(des_bias = mean(bias), des_sd = sd(bias))
 
@@ -217,6 +220,7 @@ mean_df$consistency <- ifelse(mean_df$consistency == "c", "consistent",
                                      "inconsistent1",
                                     "inconsistent2"))
 
+print(description0_df)
 print(description1_df)
 print(description2_df)
 print(mean_df)
