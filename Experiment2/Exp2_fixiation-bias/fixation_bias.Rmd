@@ -220,13 +220,26 @@ mean_df$consistency <- ifelse(mean_df$consistency == "c", "consistent",
                                      "inconsistent1",
                                     "inconsistent2"))
 
-print(description0_df)
-print(description1_df)
-print(description2_df)
-print(mean_df)
+description0_df
+description1_df
+description2_df
+mean_df
+
+#for correlation analysis
+consis_df <- mean_df %>% pivot_wider(names_from = type, 
+                                     values_from = mean_bias) %>% 
+  filter(consistency == 'consistent')
+
+consis_df
 
 ```
 
+```{r correlation analysis}
+
+corc <- cor.test(consis_df$person,consis_df$fan)
+corc
+
+```
 
 ```{r plot loading data}
 
@@ -323,10 +336,43 @@ p4
 ```
 
 
+```{r correlation plotting}
+p5 <- ggplot(consis_df, aes(x=person, y=fan)) + 
+  annotate("segment", x = -Inf, xend = Inf, y = 0, yend = 0, linetype = "dashed") +
+  annotate("segment", x = 0, xend = 0, y = -Inf, yend = Inf, linetype = "dashed") +
+  
+  geom_point(color="#F3627B", size = 4)+
+  scale_x_continuous(limits = c(-0.1,1),
+                     breaks = seq(from=-0.1,to=1,by=0.3),
+                     expand = c(0, 0.1)) +
+  scale_y_continuous(limits = c(-0.1,1),
+                     breaks = seq(from=-0.1,to=1,by=0.3),
+                     expand = c(0, 0.1)) +
+  labs(x = "Bias towards person", y = "Bias towards fan") +
+  
+  
+  geom_smooth(method=lm, color="#3e86b5", fill="#e5be79",
+              formula = y ~ x, se=TRUE) +
+  
+  
+  theme_bw()+   
+  theme(panel.grid=element_blank()) +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank())
+
+p5
+
+```
+
+
 ```{r save the plot}
 
 ggsave(p4, filename = "exp2_bias.pdf", dpi = 500,
        width=2800,height=2000,units = "px")
-#保存成pdf可以方便之后修改dpi信息(pdf储存的为矢量图)
 
+ggsave(p5, filename = "exp2_bias_corr.pdf", dpi = 500,
+       width=2800,height=2000,units = "px")
 ```
