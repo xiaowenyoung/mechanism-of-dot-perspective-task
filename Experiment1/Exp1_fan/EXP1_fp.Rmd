@@ -253,7 +253,7 @@ p<-ggplot(mean_df, aes(x = stage, y = mean_RT,
   scale_y_continuous(limits = c(0.2,1.4),
                      breaks = seq(from=0.2,to=1.4,by=0.2),
                      expand = c(0, 0.1)) +
-  labs(x = "Task stage", y = "Reaction time(secs)") +
+  labs(x = "Task stage", y = "Response time(secs)") +
 #设定x轴和y轴的最小和最大值以及步长，expand函数用于在设定轴上创造额外的空间
   
   scale_colour_manual(values=c("#e5be79","#3e86b5"),name='consistency')+
@@ -299,7 +299,7 @@ p2<-p1+geom_point(aes
                    y = mean_RT,
                    color = consistency),
                    position = position_jitter(width =0.03),
-                  size =1.0, shape =20)
+                   size =1.0, shape =20, alpha = 0.8)
 #调整散点，使取值相同的原重合散点分散开
 p2
 

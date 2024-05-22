@@ -253,7 +253,7 @@ p<-ggplot(mean_df, aes(x = stage, y = mean_RT,
   scale_y_continuous(limits = c(0.2,1.4),
                      breaks = seq(from=0.2,to=1.4,by=0.2),
                      expand = c(0, 0.1)) +
-  labs(x = "Task stage", y = "Reaction time(secs)") +
+  labs(x = "Task stage", y = "Response time(secs)") +
 #设定x轴和y轴的最小和最大值以及步长，expand函数用于在设定轴上创造额外的空间
   
   scale_colour_manual(values=c("#e5be79","#3e86b5"),name='consistency')+
@@ -288,8 +288,7 @@ p
 #adjust：调整带宽，这里设为1.2使宽带略变平滑；
 #trim：小提琴图尾部的数据修整，默认为"T",表示将尾部修整到数据范围；"F"表示不修剪尾部；
 p1<-p+geom_half_violin(position=position_nudge(x=0.1,y=0),
-                       side='R',adjust=1.2,
-                       trim=T,color=NA,alpha=0.8)
+                       side='R',adjust=1.2,trim=T,color=NA,alpha=0.8)
 p1
 
 
@@ -300,7 +299,7 @@ p2<-p1+geom_point(aes
                    y = mean_RT,
                    color = consistency),
                    position = position_jitter(width =0.03),
-                  size =1.0, shape =20)
+                   size =1.0, shape =20, alpha = 0.8)
 #调整散点，使取值相同的原重合散点分散开
 p2
 
