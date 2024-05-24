@@ -53,9 +53,9 @@ data_df <- raw_data
 
 ```{r data cleaning}
 
-data_df        <- data_df %>% filter(ACC != 0) #去除错误的试次
+data_df        <- data_df %>% filter(ACC != 0) #exclude false response
 
-#将变量转换为因子型
+#variables to factor
 data_df$subid          <- factor(data_df$subid)
 data_df$type           <- factor(data_df$type)
 data_df$consistency    <- factor(data_df$consistency)
@@ -102,7 +102,7 @@ contrasts(data_df$consistency2)
 
 ```{r full model}
 
-#首先对全模型进行拟合
+#fit full models first 
 m3.at.full <- glmer(atNum ~ 1 + type * consistency2 + 
                         (1 + type * consistency2 | subid), 
                       data = data_df,
@@ -110,17 +110,17 @@ m3.at.full <- glmer(atNum ~ 1 + type * consistency2 +
                       control = glmerControl(optimizer = 'bobyqa',
                                              calc.derivs = F,
                                              optCtrl = list(maxfun = 2e5)))
-                      #此处注视次数为不连续变量，分布为泊松分布
+                  #Here the number of gaze is a discontinuous variable with a Poisson distribution
 
 summary(m3.at.full)
-isSingular(m3.at.full) #查看是否奇异拟合
+isSingular(m3.at.full) #Check for singular fits
 
 ```
 
 
 ```{r rePCA1}
 
-#使用PCA对模型内的参数进行分析
+#Parameters within the model analyzed using PCA
 summary(rePCA(m3.at.full)) # to see how many random effects are needed. It seems 3 is good enough, not the full 6
 
 model_terms <- model.matrix(m3.at.full)  ### Please, please check the model_terms very very carefully. #see also:  https://rpubs.com/Reinhold/22193 and https://rpubs.com/yjunechoe/correlationsLMEM
@@ -128,9 +128,9 @@ model_terms <- model.matrix(m3.at.full)  ### Please, please check the model_term
 p_name   <- colnames(model.matrix(m3.at.full)) 
 par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
 # must check the column names and get the right column!!! very very important.
-#这一步生成了一个dataframe用来查看随机效应的顺序和具体内容
 
 ```
+
 ```{r full model2}
 
 re_t          <- model.matrix(m3.at.full)[,2] # random effects of type
@@ -149,14 +149,13 @@ m3.at.full2 <- glmer(atNum ~ 1  + type * consistency2 +
                                              optCtrl = list(maxfun = 2e5)))
 
 summary(m3.at.full2)
-#注意和第一个全模型进行仔细比对
 
 ```
 
 
 ```{r re2 model}
 
-#保留解释变异最大的2个随机效应
+#two random effects with the largest variance explained by retention
 m3.at.re2 <- glmer(atNum ~ 1  + type * consistency2 +
                         (1  + re_i1 | subid), 
                       data = data_df,
@@ -175,7 +174,7 @@ save(m3.at.re2, file = "m3_2res_atNum.RData")
 
 ```{r test}
 
-#检查这个模型和全模型之间是否存在差异，理想情况下应该没有差异
+#Check for differences between this model and the full model, ideally there should be no differences
 anova(m3.at.re2, m3.at.full, refit = F)
 
 ```
@@ -201,7 +200,7 @@ save(atNum.sig2, file = "atNum_sig.RData")
 
 ```{r post-hoc comparisons}
 
-#事后检验/简单效应
+#post hoc/simple effect
 #https://cran.r-project.org/web/packages/afex/vignettes/afex_mixed_example.html
 #https://zhuanlan.zhihu.com/p/63092231?utm_source=wechat_session&utm_medium=social&utm_oi=669244116261539840&s_r=0
 #https://cran.r-project.org/web/packages/emmeans/vignettes/interactions.html
@@ -209,7 +208,7 @@ save(atNum.sig2, file = "atNum_sig.RData")
 load("atNum_sig.RData")
 emmip(m3.at.re2, ~ consistency2) #simple plotting
 
-#consistency主效应
+#main effect of consistency
 emm_head <- emmeans(m3.at.re2, ~ consistency2)
 emm_head
 update(pairs(emm_head), by = NULL, adjust = "holm") 
@@ -243,44 +242,42 @@ print(mean_df)
 
 ```{r plot loading data}
 
-mean_df$consistency <- factor(mean_df$consistency)  #将自变量转换为因子型
+mean_df$consistency <- factor(mean_df$consistency)  #Convert independent variables to factor
 mean_df$type <- factor(mean_df$type, levels = c("person", "fan"))
-#如果对于自变量的排序有要求，需要手动指定levels
 
 ```
 
 
 ```{r plotting}
 
-#前置工作，设定各种基础参数
+#Pre-work, set up various base parameters
 windowsFonts(N=windowsFont("Times New Roman"),A=windowsFont("Arial")) 
 
 p<-ggplot(mean_df, aes(x = type, y = mean_atNum, 
                        fill = consistency,color = consistency)) +
-#设定x轴和y轴，同时设定图例，fill为填充，color为边框
+# Set the x-axis and y-axis, as well as the legend, fill for the fill, color for the border
   
   scale_y_continuous(limits = c(0,2.2),
                      breaks = seq(from=0,to=2.0,by=0.4),
                      expand = expansion(mult = c(0, 0.1))) +
   labs(x = "Type", y = "Number of fixations") +
-#设定x轴和y轴的最小和最大值以及步长，expand函数用于在设定轴上创造额外的空间
+# Set the minimum and maximum values of the x- and y-axes as well as the step size, the expand function is used to create additional space on the set axes
   
   scale_colour_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
   scale_fill_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
-#设定color和fill的颜色，此处为全局设定，但是后面可以用ggnewscale包进行局部设定
+# Set the color and fill color, this is a global setting, but you can use the ggnewscale package to set it locally later.
   
   theme(legend.position="right",
         legend.title = element_text(size=10,colour='black',family="A"),
         legend.text = element_text(size=10,colour='black',family="A"),
         legend.key.size=unit(0.5,"cm"),
-        #图例的设定
         
-        axis.ticks.length = unit(0.1, "cm"),  #轴上刻度长度的设定
+        axis.ticks.length = unit(0.1, "cm"),  
         axis.text.x = element_text(size=16,colour='black',family ="A"),
         axis.text.y = element_text(size=16,colour='black',family="A"),
         axis.title.x = element_text(size=20,colour='black',family="A"),
         axis.title.y = element_text(size=20,colour='black',family="A"))
-        #轴标题以及轴刻度文字的设定
+
 p
 
 ```
@@ -320,8 +317,8 @@ p3 <- p2 + geom_beeswarm(data = mean_df, aes(y = mean_atNum),
                   tip_length=0, size=0.8, textsize = 7,  vjust = 0.4)
 
 p3
-#去掉灰底, 去掉背景网格线, 去掉顶部和右侧框线
-p4 <- p3+theme_bw()+   #使用bw这个theme自动优化图形的美观性
+
+p4 <- p3+theme_bw()+   
   theme(panel.grid=element_blank()) +
   theme(axis.line = element_line(colour = "black"),
     panel.grid.major = element_blank(),
@@ -337,7 +334,6 @@ p4
 
 ggsave(p4, filename = "exp2_atNum.pdf", dpi = 500,
        width=2800,height=2000,units = "px")
-#保存成pdf可以方便之后修改dpi信息(pdf储存的为矢量图)
 
 ```
 

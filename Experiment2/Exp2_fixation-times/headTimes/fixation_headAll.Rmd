@@ -50,7 +50,7 @@ data_df <- raw_data
 
 data_df        <- data_df %>% filter(ACC != 0) #exclude false trials
 data_df$headAll  <- data_df$headAll * 1000 #s to ms
-data_df$headAll[is.na(data_df$headAll)]<- 0 #将N因变量下的NA换成0
+data_df$headAll[is.na(data_df$headAll)]<- 0 #NA to 0
 
 
 #Converts variables to factor type
@@ -193,17 +193,17 @@ save(headAll.sig2, file = "headAll_sig.RData")
 emm_options(lmer.df = "asymptotic") 
 emmip(m2.head.re3, ~ consistency2) #simple plotting
 
-#consistency的主效应
+#main effect of consistency 
 emm_RT0 <- emmeans(m2.head.re3, ~ consistency2)
 emm_RT0
 update(pairs(emm_RT0), by = NULL, adjust = "holm") 
 
-#type简单主效应
+#simple main effect of type 
 emm_RT1 <- emmeans(m2.head.re3, ~ type | consistency2)
 emm_RT1
 update(pairs(emm_RT1), by = NULL, adjust = "holm") 
 
-#consistency的简单主效应
+#simple main effect of consistency
 emm_RT2 <- emmeans(m2.head.re3, ~consistency2 | type)
 emm_RT2
 update(pairs(emm_RT2), by = NULL, adjust = "holm") 

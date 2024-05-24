@@ -60,14 +60,14 @@ data_df <- raw_data
 
 data_df          <- data_df %>% filter(consistency != 'filler')
 
-#将变量转换为因子型
+# Convert variables to factors
 data_df$subid          <- factor(data_df$subid)
 data_df$type           <- factor(data_df$type)
 data_df$consistency    <- factor(data_df$consistency)
 
 data_df$consistency2   <- factor(data_df$consistency,levels=c('c','i1','i2')) #reorder the levels; consistency2 was computed to avoid errors in emmeans package.
 
-#我们的因变量为多项分布的数据，这里也把它因子化
+# Our dependent variable is multinomial distributed data, which is also factored here
 data_df$bias <- factor(data_df$bias, ordered = TRUE)
 
 ```
@@ -109,8 +109,7 @@ contrasts(data_df$consistency2)
 
 ```{r full model}
 
-#首先对全模型进行拟合
-
+# First fit the full model
 m1.full <- clmm(bias ~ 1 + type * consistency2 + 
                 (1 + type * consistency2 | subid), 
                 data = data_df)
@@ -124,7 +123,7 @@ summary(m1.full)
 
 ```{r rePCA1}
 
-# 提取随机效应
+# Extracting random effects
 random_effects <- ranef(m1.full)$subid
 pca_result <- prcomp(random_effects)
 summary(pca_result)
@@ -133,7 +132,6 @@ model_terms <- model.matrix(m1.full)
 p_name   <- colnames(model.matrix(m1.full)) 
 par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
 # must check the column names and get the right column!!! very very important.
-#这一步生成了一个dataframe用来查看随机效应的顺序和具体内容
 
 ```
 
@@ -141,7 +139,7 @@ par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)
 
 ```{r re1 model}
 
-#发现保留截距已经可以解释全部变异
+# found that the retained intercept already explains all the variation
 m1.bias.re1 <- clmm(bias ~ 1 + type * consistency2 +
                       (1 |subid), 
                       data = data_df, Hess = TRUE)
@@ -173,24 +171,24 @@ save(bias.sig, file = "bias_sig.RData")
 emmip(m1.bias.re1, ~ consistency2 | type) #simple plotting
 emmip(m1.bias.re1, ~ type | consistency2) #simple plotting
 
-#type主效应
+# main effect of type
 emm_t <- emmeans(m1.bias.re1, ~ type)
 emm_t
 update(pairs(emm_t), by = NULL, adjust = "holm") 
 
 # using the FDR corrections here
-#consistency主效应
+# main effect of consistency
 emm_c <- emmeans(m1.bias.re1, ~ consistency2)
 emm_c
 update(pairs(emm_c), by = NULL, adjust = "holm") 
 # using the FDR corrections here
 
-#type简单主效应
+# simple effect of type
 emm_tc <- emmeans(m1.bias.re1, ~ type | consistency2)
 emm_tc
 update(pairs(emm_tc), by = NULL, adjust = "holm") 
 
-#consistency简单主效应
+#simple effect of consistency
 emm_ct <- emmeans(m1.bias.re1, ~ consistency2 | type)
 emm_ct
 update(pairs(emm_ct), by = NULL, adjust = "holm") 
@@ -243,44 +241,42 @@ corc
 
 ```{r plot loading data}
 
-mean_df$consistency <- factor(mean_df$consistency)  #将自变量转换为因子型
+mean_df$consistency <- factor(mean_df$consistency)  #Convert independent variables to factor
 mean_df$type <- factor(mean_df$type, levels = c("person", "fan"))
-#如果对于自变量的排序有要求，需要手动指定levels
 
 ```
 
 
-```{r 前置工作/画背景}
+```{r draw plot background}
 
-#前置工作，设定各种基础参数
+#Pre-work, set various basic parameters
 windowsFonts(N=windowsFont("Times New Roman"),A=windowsFont("Arial")) 
 
 p<-ggplot(mean_df, aes(x = type, y = mean_bias, 
                        fill = consistency,color = consistency)) +
-#设定x轴和y轴，同时设定图例，fill为填充，color为边框
+#Set the x-axis and y-axis, as well as the legend, fill for the fill, color for the border
   
   scale_y_continuous(limits = c(-1,1.2),
                      breaks = seq(from=-1 ,to=1, by=0.4),
                      expand = expansion(mult = c(0, 0.1))) +
   labs(x = "Type", y = "Fixation bias") +
-#设定x轴和y轴的最小和最大值以及步长，expand函数用于在设定轴上创造额外的空间
+#Setting the minimum and maximum values of the x- and y-axes as well as the step size, the expand function is used to create additional space on the set axes.
   
   scale_colour_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
   scale_fill_manual(values=c("#F3627B","#e5be79","#3e86b5"),name='consistency')+
-#设定color和fill的颜色，此处为全局设定，但是后面可以用ggnewscale包进行局部设定
+#Set the color and fill color. This is a global setting, but you can use the ggnewscale package to set it locally later.
   
   theme(legend.position="right",
         legend.title = element_text(size=10,colour='black',family="A"),
         legend.text = element_text(size=10,colour='black',family="A"),
         legend.key.size=unit(0.5,"cm"),
-        #图例的设定
         
-        axis.ticks.length = unit(0.1, "cm"),  #轴上刻度长度的设定
+        axis.ticks.length = unit(0.1, "cm"),  
         axis.text.x = element_text(size=16,colour='black',family ="A"),
         axis.text.y = element_text(size=16,colour='black',family="A"),
         axis.title.x = element_text(size=20,colour='black',family="A"),
         axis.title.y = element_text(size=20,colour='black',family="A"))
-        #轴标题以及轴刻度文字的设定
+
 p
 
 ```
@@ -323,8 +319,8 @@ p3 <- p2 + geom_beeswarm(data = mean_df, aes(y = mean_bias),
                   tip_length=0.05, size= 0.6, textsize = 7,  vjust = 0.4)
 
 p3
-#去掉灰底, 去掉背景网格线, 去掉顶部和右侧框线
-p4 <- p3+theme_bw()+   #使用bw这个theme自动优化图形的美观性
+
+p4 <- p3+theme_bw()+   
   theme(panel.grid=element_blank()) +
   theme(axis.line = element_line(colour = "black"),
     panel.grid.major = element_blank(),

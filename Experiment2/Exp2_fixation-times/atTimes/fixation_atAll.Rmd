@@ -1,5 +1,5 @@
 ---
-title: "EXP2_fixation numbers_faced at"
+title: "EXP2_fixation time_faced at"
 date: "2024.03.04"
 output:
   html_document:
@@ -45,12 +45,12 @@ data_df <- raw_data
 
 ```{r data cleaning}
 
-data_df        <- data_df %>% filter(ACC != 0) #去除错误的试次
-data_df$atAll  <- data_df$atAll * 1000 #将s的单位转换为ms
-data_df$atAll[is.na(data_df$atAll)]<- 0 #将NA换成0
+data_df        <- data_df %>% filter(ACC != 0) #exclude false trials
+data_df$atAll  <- data_df$atAll * 1000 #s to ms
+data_df$atAll[is.na(data_df$atAll)]<- 0 #NA to 0
 
 
-#将变量转换为因子型
+#Converts variables to factor type
 data_df$subid          <- factor(data_df$subid)
 data_df$type           <- factor(data_df$type)
 data_df$consistency    <- factor(data_df$consistency)
@@ -95,7 +95,7 @@ contrasts(data_df$consistency2)
 
 ```{r full model}
 
-#首先对全模型进行拟合
+#fit maximal model first
 m2.at.full <- lmer(atAll ~ 1 + type * consistency2 + 
                      (1 + type * consistency2 | subid), 
                      data = data_df,
@@ -104,13 +104,13 @@ m2.at.full <- lmer(atAll ~ 1 + type * consistency2 +
                                            optCtrl = list(maxfun = 2e5)))
 
 summary(m2.at.full)
-isSingular(m2.at.full) #查看是否奇异拟合
+isSingular(m2.at.full) #Check for a singular fit
 
 ```
 
 ```{r rePCA1}
 
-#使用PCA对模型内的参数进行分析
+#Random effects in the model were analyzed using PCA
 summary(rePCA(m2.at.full)) # to see how many random effects are needed. It seems 3 is good enough, not the full 6
 
 model_terms <- model.matrix(m2.at.full)  ### Please, please check the model_terms very very carefully. #see also:  https://rpubs.com/Reinhold/22193 and https://rpubs.com/yjunechoe/correlationsLMEM
@@ -118,7 +118,6 @@ model_terms <- model.matrix(m2.at.full)  ### Please, please check the model_term
 p_name   <- colnames(model.matrix(m2.at.full)) 
 par_info <- data.frame('number'=c(1:length(p_name)),'names'=p_name)  
 # must check the column names and get the right column!!! very very important.
-#这一步生成了一个dataframe用来查看随机效应的顺序和具体内容
 
 ```
 
@@ -139,14 +138,14 @@ m2.at.full2 <- lmer(atAll ~ 1  + type * consistency2 +
                                             optCtrl = list(maxfun = 2e5)))
 
 summary(m2.at.full2)
-#注意和第一个全模型进行仔细比对
+#Careful compare with the first full model
 
 ```
 
 
 ```{r re2 model}
 
-#保留解释变异最大的2个随机效应
+#PCA suggests that 2 random effects are sufficient to interpret all the variance
 m2.at.re2 <- lmer(atAll ~ 1  + type * consistency2 +
                         (1 + re_c| subid), 
                       data = data_df,
@@ -165,7 +164,7 @@ save(m2.at.re2, file = "m2_2res_atAll.RData")
 
 ```{r test}
 
-#检查这个模型和全模型之间是否存在差异，理想情况下应该没有差异
+#Check for differences between this model and the full model, Ideally there should be no difference
 anova(m2.at.re1, m2.at.full, refit = F)
 
 ```
@@ -190,10 +189,10 @@ save(atAll.sig2, file = "atAll_sig.RData")
 
 ```{r post-hoc comparisons}
 
-#事后检验/简单效应
+#post hoc/simple effect
 emmip(m2.at.re1, ~ consistency2) #simple plotting
 
-#consistency主效应
+#main effect of consistency
 emm_at <- emmeans(m2.at.re2, ~ consistency2)
 emm_at
 update(pairs(emm_at), by = NULL, adjust = "holm") 
