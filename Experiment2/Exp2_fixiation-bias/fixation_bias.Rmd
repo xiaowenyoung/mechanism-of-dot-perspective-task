@@ -193,6 +193,12 @@ emm_ct <- emmeans(m1.bias.re1, ~ consistency2 | type)
 emm_ct
 update(pairs(emm_ct), by = NULL, adjust = "holm") 
 
+
+confint(pairs(emm_t), adjust = "holm")
+confint(pairs(emm_c), adjust = "holm")
+confint(pairs(emm_tc), adjust = "holm")
+confint(pairs(emm_ct), adjust = "holm")
+
 ```
 
 

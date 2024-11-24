@@ -211,6 +211,9 @@ emm_RT2 <- emmeans(m1.re2, ~consistency2 | type)
 emm_RT2
 update(pairs(emm_RT2), by = NULL, adjust = "holm") 
 
+confint(pairs(emm_RT0), adjust = "holm")
+confint(pairs(emm_RT2), adjust = "holm")
+
 ```
 
 ```{r mean data of paticipant}
@@ -458,6 +461,9 @@ update(pairs(emc_RT0), by = NULL, adjust = "holm")
 emc_RT2 <- emmeans(mc.re1, ~consistency | type)
 emc_RT2
 update(pairs(emc_RT2), by = NULL, adjust = "holm") 
+
+confint(pairs(emc_RT0), adjust = "holm")
+confint(pairs(emc_RT2), adjust = "holm")
 
 
 description1c_df  <- new_df %>% group_by(consistency) %>%

@@ -42,7 +42,7 @@ select <- dplyr::select # to avoid clashes with the MASS package
 
 ```{r loaddata}
 
-raw_data  <- read.csv(file="data_fp.csv",head=TRUE) #read data
+raw_data  <- read.csv(file="data_fp_original.csv",head=TRUE) #read data
 data_df <- raw_data
 
 ```
@@ -207,6 +207,9 @@ emm_RT2 <- emmeans(m1.re2, ~consistency | stage)
 emm_RT2
 update(pairs(emm_RT2), by = NULL, adjust = "holm") 
 
+confint(pairs(emm_RT0), adjust = "holm")
+confint(pairs(emm_RT2), adjust = "holm")
+
 ```
 
 
@@ -324,5 +327,155 @@ p4
 
 ggsave(p4, filename = "fp_plot.pdf", dpi = 600,
        width=2800,height=2000,units = "px")
+
+```
+
+
+```{r effect along the time}
+
+data_df <- data_df %>%
+  group_by(participant) %>%
+  mutate(trial_num = row_number())
+
+# 计算 RT 差值
+calculate_rt_difference_two_quantiles <- function(df) {
+  result <- data.frame(participant = character(), stage = character(), quantile_group = integer(), rt_diff = numeric())
+  
+  # 针对每个参与者进行处理
+  for (p in unique(df$participant)) {
+    for (s in c("baseline", "adapt")) {
+      # 筛选出当前参与者和当前阶段的数据
+      participant_stage_data <- subset(df, participant == p & stage == s)
+      
+      # 按照参与者的 trial_num 划分为两个分位
+      participant_stage_data$quantile_group <- cut(participant_stage_data$trial_num, 
+                                                  breaks = quantile(participant_stage_data$trial_num, probs = 0:2 / 2), 
+                                                  include.lowest = TRUE, labels = FALSE)
+      
+      # 针对每个分位组计算 RT 差值
+      for (q in 1:2) {
+        # 获取 consistency 为 i 和 c 的 RT 值
+        consistency_i <- subset(participant_stage_data, consistency == "i" & quantile_group == q)$RT
+        consistency_c <- subset(participant_stage_data, consistency == "c" & quantile_group == q)$RT
+        
+        # 如果存在 consistency_i 和 consistency_c 数据，计算差值
+        if (length(consistency_i) > 0 && length(consistency_c) > 0) {
+          rt_diff <- mean(consistency_i) - mean(consistency_c)
+          
+          # 将结果添加到数据框
+          result <- rbind(result, data.frame(participant = p, stage = s, quantile_group = q, rt_diff = rt_diff))
+        } else {
+          # 如果缺少数据，跳过当前分位组
+          next
+        }
+      }
+    }
+  }
+  
+  return(result)
+}
+
+# 计算 RT 差值
+rt_diff_result <- calculate_rt_difference_two_quantiles(data_df)
+
+average_rt_diff <- rt_diff_result %>%
+  group_by(stage, quantile_group) %>%   # 按stage和quantile_group分组
+  summarise(average_rt_diff = mean(rt_diff, na.rm = TRUE))  # 计算平均RT差值，忽略NA值
+
+```
+
+```{r ttest of time course}
+
+# 检验 baseline 和 adapt 两阶段的两分位差异是否显著
+
+# 分别提取 baseline 和 adapt 的数据
+baseline_data <- subset(rt_diff_result, stage == "baseline")
+adapt_data <- subset(rt_diff_result, stage == "adapt")
+
+# 确保数据按照 participant 和 quantile_group 排序
+baseline_data <- baseline_data[order(baseline_data$participant,
+                                     baseline_data$quantile_group), ]
+adapt_data <- adapt_data[order(adapt_data$participant, adapt_data$quantile_group), ]
+
+# 计算 baseline 的第一分位和第二分位的差异是否显著
+baseline_quantile1 <- subset(baseline_data, quantile_group == 1)$rt_diff
+baseline_quantile2 <- subset(baseline_data, quantile_group == 2)$rt_diff
+
+baseline_t_test <- t.test(baseline_quantile1, baseline_quantile2, paired = TRUE)
+cat("Baseline Stage:\n")
+print(baseline_t_test)
+
+# 计算 adapt 的第一分位和第二分位的差异是否显著
+adapt_quantile1 <- subset(adapt_data, quantile_group == 1)$rt_diff
+adapt_quantile2 <- subset(adapt_data, quantile_group == 2)$rt_diff
+
+adapt_t_test <- t.test(adapt_quantile1, adapt_quantile2, paired = TRUE)
+cat("\nAdapt Stage:\n")
+print(adapt_t_test)
+
+```
+
+
+```{r plot exercise effect}
+
+
+average_rt_diff2 <- rt_diff_result %>%
+  group_by(stage, quantile_group) %>%
+  summarize(
+    average_rt_diff = mean(rt_diff, na.rm = TRUE),
+    se = sd(rt_diff, na.rm = TRUE) / sqrt(n())
+  )
+
+
+df.plot <- rt_diff_result %>%
+  dplyr::mutate(conds = case_when(stage == "adapt" & quantile_group == "1" ~ "0.88",
+                                  stage == "baseline" & quantile_group == "1" ~ "1.12",
+                                  stage == "adapt" & quantile_group == "2" ~ "1.88",
+                                  stage == "baseline" & quantile_group == "2" ~ "2.12"),
+                conds = as.numeric(conds))
+
+
+s1 <- ggplot(average_rt_diff2, 
+       aes(x = factor(quantile_group), 
+           y = average_rt_diff, 
+           color = stage, 
+           group = stage)) +
+  geom_line(position = position_dodge(0.5)) +  # 绘制平均值的折线图
+  geom_point(size = 3, position = position_dodge(0.5)) +  # 绘制平均值的点
+  geom_errorbar(aes(ymin = average_rt_diff - se, ymax = average_rt_diff + se),
+                width = 0.1,
+                position = position_dodge(0.5)) +  # 绘制误差棒
+  # 绘制个体点
+  geom_point(data = df.plot,
+                      aes(x = conds, y = rt_diff,
+                          group = interaction(participant, stage), color = stage),
+                          position = position_dodge(0.08),
+                          alpha = 0.1) +
+  # 绘制个体连线，仅在同一个 stage 内连线
+  geom_line(data = df.plot,
+                     aes(x = conds, y = rt_diff,
+                         group = interaction(participant, stage), color = stage),
+                         position = position_dodge(0.08),
+                         linetype = 1,
+                         size = 0.8,
+                         alpha = 0.1) +
+  labs(title = "Experiment 1 (fan)",
+       x = "Time Course",
+       y = "Consistency Effect Size",
+       color = "Stage") +
+  theme_minimal() +  # 使用简洁的主题
+  theme(plot.title = element_text(hjust = 0.5)) +  # 标题居中
+  scale_x_discrete(labels = c("1st half", "2nd half")) +  # 修改 x 轴标签
+  theme(panel.grid = element_blank()) +
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+
+s1
+
+ggsave(s1, filename = "fp_time_course.pdf", dpi = 600,
+       width=4000,height=3000,units = "px")
 
 ```
