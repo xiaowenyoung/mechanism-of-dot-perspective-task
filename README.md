@@ -1,6 +1,7 @@
 # The self-consistency effect seen on the Dot Perspective Task: Perspective taking or attention cueing?
 
 Binjie Yang, Qiang Zhou et al., 2023
+https://doi.org/10.1177/17470218251346447
 
 ## Experiment 1
 
